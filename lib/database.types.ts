@@ -237,6 +237,42 @@ export interface Database {
           },
         ]
       }
+      email_logs: {
+        Row: {
+          id: number
+          recipient: string
+          template: string
+          subject: string | null
+          data: Json | null
+          status: string
+          created_at: string
+          sent_at: string | null
+          error: string | null
+        }
+        Insert: {
+          id?: number
+          recipient: string
+          template: string
+          subject?: string | null
+          data?: Json | null
+          status: string
+          created_at?: string
+          sent_at?: string | null
+          error?: string | null
+        }
+        Update: {
+          id?: number
+          recipient?: string
+          template?: string
+          subject?: string | null
+          data?: Json | null
+          status?: string
+          created_at?: string
+          sent_at?: string | null
+          error?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
