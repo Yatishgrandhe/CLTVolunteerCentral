@@ -105,13 +105,15 @@ export async function sendEmail({ to, subject, template, data = {} }: SendEmailP
 // sendAuthEmail should also be reviewed if it directly uses a Supabase client.
 
 export async function generateEmailToken(email: string, type: "signup" | "reset" | "magic-link"): Promise<string> {
-    let expiresIn = "24h"; 
-    if (type === "reset") expiresIn = "1h";
-    if (type === "magic-link") expiresIn = "10m";
-    return jwt.sign({ email, type }, supabaseJwtSecret, { expiresIn });
-  } //
+  let expiresIn: string | number = "24h";
+  if (type === "reset") expiresIn = "1h";
+  if (type === "magic-link") expiresIn = "10m";
+  // Fix: ensure supabaseJwtSecret is a non-empty string and pass as Secret type
+  if (!supabaseJwtSecret) throw new Error("SUPABASE_JWT_SECRET is not set");
+  return jwt.sign({ email, type }, supabaseJwtSecret, { expiresIn } as jwt.SignOptions);
+} //
 
-  export async function verifyEmailToken(token: string): Promise<{ email: string; type: string } | null> {
+export async function verifyEmailToken(token: string): Promise<{ email: string; type: string } | null> {
     try {
       const decoded = jwt.verify(token, supabaseJwtSecret) as { email: string; type: string };
       return decoded;
