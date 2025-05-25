@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin"; // Adjust path if necessary
 // REMOVE these:
 // const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
 // const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
-const supabaseJwtSecret = process.env.SUPABASE_JWT_SECRET || ""; // Keep JWT secret if used directly here
+// const supabaseJwtSecret = process.env.SUPABASE_JWT_SECRET || ""; // Keep JWT secret if used directly here
 
 // REMOVE this line:
 // const supabaseAdmin = createClient<Database>(supabaseUrl, supabaseServiceKey)
