@@ -1,5 +1,3 @@
-"use server" // Keep this if actions within this file are also directly called from client
-
 // REMOVE these:
 // import { createClient } from "@supabase/supabase-js"
 // import type { Database } from "@/lib/database.types"
