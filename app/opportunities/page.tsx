@@ -1,205 +1,265 @@
 "use client"
 
-import type React from "react"
-
-import { useEffect, useState } from "react"
-import { useSupabase } from "@/lib/supabase-provider"
-import type { Opportunity, Category } from "@/lib/types"
-import OpportunityCard from "@/components/opportunity-card"
-import { Input } from "@/components/ui/input"
+import { useState, useEffect } from "react"
+import { Navigation } from "@/components/navigation"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { AlertCircle, CalendarIcon, Search } from "lucide-react"
-import { Calendar } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { format } from "date-fns"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { useAuth } from "@/hooks/use-auth"
+import { supabase, type Opportunity } from "@/lib/supabase"
+import { useToast } from "@/hooks/use-toast"
+import { Calendar, MapPin, Users, Clock, Search, Filter } from "lucide-react"
 
 export default function OpportunitiesPage() {
-  const { supabase } = useSupabase()
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
+  const [filteredOpportunities, setFilteredOpportunities] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [selectedCategory, setSelectedCategory] = useState<string>("")
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [categoryFilter, setCategoryFilter] = useState("all")
+  const { user, profile } = useAuth()
+  const { toast } = useToast()
 
   useEffect(() => {
-    async function fetchCategories() {
-      try {
-        const { data, error } = await supabase.from("categories").select("*").order("name")
-
-        if (error) {
-          console.error("Error fetching categories:", error)
-          // Don't show an error for categories, just log it
-        } else {
-          setCategories(data || [])
-        }
-      } catch (err) {
-        console.error("Exception fetching categories:", err)
-      }
-    }
-
-    fetchCategories()
-  }, [supabase])
-
-  useEffect(() => {
-    async function fetchOpportunities() {
-      setLoading(true)
-      setError(null)
-
-      try {
-        let query = supabase
-          .from("opportunities")
-          .select(`
-            id,
-            title,
-            description,
-            location,
-            start_date,
-            end_date,
-            image_url,
-            slots_available,
-            slots_filled,
-            category_id,
-            categories(name)
-          `)
-          .gt("end_date", new Date().toISOString())
-          .order("start_date", { ascending: true })
-
-        // Apply filters
-        if (searchQuery) {
-          query = query.or(
-            `title.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`,
-          )
-        }
-
-        if (selectedCategory && selectedCategory !== "all") {
-          query = query.eq("category_id", selectedCategory)
-        }
-
-        if (selectedDate) {
-          const dateStr = format(selectedDate, "yyyy-MM-dd")
-          query = query.gte("start_date", `${dateStr}T00:00:00Z`).lte("start_date", `${dateStr}T23:59:59Z`)
-        }
-
-        const { data, error } = await query
-
-        if (error) {
-          console.error("Error fetching opportunities:", error)
-          setError("Failed to load opportunities. Please try again later.")
-        } else {
-          setOpportunities(data || [])
-        }
-      } catch (err) {
-        console.error("Exception fetching opportunities:", err)
-        setError("An unexpected error occurred. Please try again later.")
-      } finally {
-        setLoading(false)
-      }
-    }
-
     fetchOpportunities()
-  }, [supabase, searchQuery, selectedCategory, selectedDate])
+  }, [])
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    // The search is already handled by the useEffect
+  useEffect(() => {
+    filterOpportunities()
+  }, [opportunities, searchTerm, categoryFilter])
+
+  const fetchOpportunities = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("opportunities")
+        .select("*")
+        .eq("status", "active")
+        .order("date_time", { ascending: true })
+
+      if (error) throw error
+      setOpportunities(data || [])
+    } catch (error) {
+      console.error("Error fetching opportunities:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load opportunities.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleReset = () => {
-    setSearchQuery("")
-    setSelectedCategory("")
-    setSelectedDate(undefined)
+  const filterOpportunities = () => {
+    let filtered = opportunities
+
+    if (searchTerm) {
+      filtered = filtered.filter(
+        (opp) =>
+          opp.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          opp.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          opp.location?.toLowerCase().includes(searchTerm.toLowerCase()),
+      )
+    }
+
+    setFilteredOpportunities(filtered)
+  }
+
+  const handleSignUp = async (opportunityId: string) => {
+    if (!user) {
+      toast({
+        title: "Please sign in",
+        description: "You need to be signed in to sign up for opportunities.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const { error } = await supabase.from("volunteer_signups").insert({
+        opportunity_id: opportunityId,
+        volunteer_id: user.id,
+      })
+
+      if (error) throw error
+
+      toast({
+        title: "Success!",
+        description: "You have successfully signed up for this opportunity.",
+      })
+
+      // Refresh opportunities to update counts
+      fetchOpportunities()
+    } catch (error: any) {
+      if (error.code === "23505") {
+        toast({
+          title: "Already signed up",
+          description: "You are already signed up for this opportunity.",
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to sign up for opportunity.",
+          variant: "destructive",
+        })
+      }
+    }
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Volunteer Opportunities</h1>
-        <p className="text-muted-foreground">Find and join volunteer opportunities in your community</p>
+    <div className="min-h-screen bg-gray-50">
+      <Navigation />
+
+      {/* Header Section */}
+      <div className="bg-white border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">Volunteer Opportunities</h1>
+            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+              Find meaningful ways to give back to the Charlotte community. Every contribution makes a difference.
+            </p>
+          </div>
+
+          {/* Search and Filter */}
+          <div className="flex flex-col md:flex-row gap-4 max-w-2xl mx-auto">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                placeholder="Search opportunities..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-full md:w-48">
+                <Filter className="w-4 h-4 mr-2" />
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                <SelectItem value="education">Education</SelectItem>
+                <SelectItem value="environment">Environment</SelectItem>
+                <SelectItem value="community">Community</SelectItem>
+                <SelectItem value="health">Health & Wellness</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </div>
 
-      <div className="bg-card rounded-lg p-4 mb-8 shadow-sm">
-        <form onSubmit={handleSearch} className="space-y-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Search opportunities..."
-                  className="pl-8"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:w-2/3">
-              <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All Categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  {categories.map((category) => (
-                    <SelectItem key={category.id} value={category.id}>
-                      {category.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {/* Opportunities Grid */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {loading ? (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardHeader>
+                  <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+                  <div className="h-3 bg-gray-200 rounded w-full"></div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                    <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+                    <div className="h-8 bg-gray-200 rounded w-full mt-4"></div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : filteredOpportunities.length === 0 ? (
+          <Card>
+            <CardContent className="text-center py-12">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                {searchTerm ? "No opportunities found" : "No opportunities available"}
+              </h3>
+              <p className="text-gray-600">
+                {searchTerm
+                  ? "Try adjusting your search terms or filters."
+                  : "Check back soon for new volunteer opportunities."}
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {filteredOpportunities.map((opportunity) => (
+              <Card key={opportunity.id} className="flex flex-col hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <div className="flex items-start justify-between">
+                    <CardTitle className="text-lg leading-tight">{opportunity.title}</CardTitle>
+                    <Badge
+                      variant={
+                        opportunity.current_volunteers >= (opportunity.max_volunteers || 0) ? "destructive" : "default"
+                      }
+                      className="ml-2 flex-shrink-0"
+                    >
+                      {opportunity.current_volunteers >= (opportunity.max_volunteers || 0) ? "Full" : "Open"}
+                    </Badge>
+                  </div>
+                  <CardDescription className="line-clamp-3">{opportunity.description}</CardDescription>
+                </CardHeader>
+                <CardContent className="flex-1 flex flex-col justify-between">
+                  <div className="space-y-3 mb-6">
+                    {opportunity.date_time && (
+                      <>
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Calendar className="w-4 h-4 mr-2 flex-shrink-0" />
+                          <span>
+                            {new Date(opportunity.date_time).toLocaleDateString("en-US", {
+                              weekday: "long",
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            })}
+                          </span>
+                        </div>
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
+                          <span>
+                            {new Date(opportunity.date_time).toLocaleTimeString("en-US", {
+                              hour: "numeric",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                    {opportunity.location && (
+                      <div className="flex items-center text-sm text-gray-600">
+                        <MapPin className="w-4 h-4 mr-2 flex-shrink-0" />
+                        <span className="truncate">{opportunity.location}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center text-sm text-gray-600">
+                      <Users className="w-4 h-4 mr-2 flex-shrink-0" />
+                      <span>
+                        {opportunity.current_volunteers} / {opportunity.max_volunteers || "∞"} volunteers
+                      </span>
+                    </div>
+                  </div>
 
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="justify-start text-left font-normal">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {selectedDate ? format(selectedDate, "PPP") : <span>Pick a date</span>}
+                  <Button
+                    onClick={() => handleSignUp(opportunity.id)}
+                    disabled={
+                      !user || opportunity.current_volunteers >= (opportunity.max_volunteers || Number.MAX_SAFE_INTEGER)
+                    }
+                    className="w-full"
+                  >
+                    {!user
+                      ? "Sign In to Register"
+                      : opportunity.current_volunteers >= (opportunity.max_volunteers || Number.MAX_SAFE_INTEGER)
+                        ? "Full"
+                        : "Sign Up"}
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar mode="single" selected={selectedDate} onSelect={setSelectedDate} initialFocus />
-                </PopoverContent>
-              </Popover>
-            </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={handleReset}>
-              Reset Filters
-            </Button>
-            <Button type="submit">Search</Button>
-          </div>
-        </form>
+        )}
       </div>
-
-      {error && (
-        <Alert variant="destructive" className="mb-6">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-[350px] rounded-lg bg-muted animate-pulse"></div>
-          ))}
-        </div>
-      ) : opportunities.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {opportunities.map((opportunity) => (
-            <OpportunityCard key={opportunity.id} opportunity={opportunity} />
-          ))}
-        </div>
-      ) : (
-        <div className="text-center py-12 bg-muted rounded-lg">
-          <h3 className="text-xl font-medium mb-2">No opportunities found</h3>
-          <p className="text-muted-foreground mb-6">Try adjusting your search filters or check back later</p>
-          <Button onClick={handleReset}>Clear Filters</Button>
-        </div>
-      )}
     </div>
   )
 }

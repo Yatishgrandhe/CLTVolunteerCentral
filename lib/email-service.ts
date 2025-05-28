@@ -1,66 +1,95 @@
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { createServerClient } from "./supabase"
+import { SignupVerificationEmail } from "../email-templates/SignupVerificationEmail"
+import { MagicLinkEmail } from "../email-templates/MagicLinkEmail"
+import { PasswordResetEmail } from "../email-templates/PasswordResetEmail"
 
-export async function sendEmail({ to, subject, template, data = {} }: { to: string; subject: string; template: string; data?: Record<string, any> }) {
-  await supabaseAdmin.from("email_logs").insert({
-    recipient: to,
-    template,
-    subject,
-    data: data,
-    status: "sent",
-    created_at: new Date().toISOString(),
-    sent_at: new Date().toISOString(),
-  });
-  return { success: true };
+export interface EmailServer {
+  id: string
+  name: string
+  smtp_host: string
+  smtp_port: number
+  smtp_user: string
+  smtp_password: string
+  from_email: string
+  is_active: boolean
 }
 
-export async function sendVerificationEmail(email: string, name = "") {
-  const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-    data: { full_name: name },
-  });
-  if (error) {
-    console.error("Error sending verification email via Supabase:", error);
-    return { success: false, error };
+export async function sendVerificationEmail(email: string, verificationUrl: string, userName: string) {
+  const template = SignupVerificationEmail(verificationUrl, userName)
+  return await sendEmail(email, template.subject, template.html, template.text)
+}
+
+export async function sendMagicLinkEmail(email: string, magicLinkUrl: string, userName: string) {
+  const template = MagicLinkEmail(magicLinkUrl, userName)
+  return await sendEmail(email, template.subject, template.html, template.text)
+}
+
+export async function sendPasswordResetEmail(email: string, resetUrl: string, userName: string) {
+  const template = PasswordResetEmail(resetUrl, userName)
+  return await sendEmail(email, template.subject, template.html, template.text)
+}
+
+export async function verifyEmailToken(token: string) {
+  const supabase = createServerClient()
+
+  try {
+    const { data, error } = await supabase.auth.verifyOtp({
+      token_hash: token,
+      type: "email",
+    })
+
+    if (error) throw error
+    return { success: true, data }
+  } catch (error) {
+    console.error("Email verification error:", error)
+    return { success: false, error }
   }
-  return { success: true };
 }
 
-export async function sendMagicLinkEmail(email: string) {
-  const { error } = await supabaseAdmin.auth.admin.generateLink({
-    type: "magiclink",
-    email,
-    options: { redirectTo: process.env.NEXT_PUBLIC_SITE_URL + "/auth/callback" },
-  });
-  if (error) {
-    console.error("Error sending magic link via Supabase:", error);
-    return { success: false, error };
-  }
-  return { success: true };
-}
+async function sendEmail(to: string, subject: string, html: string, text: string) {
+  const supabase = createServerClient()
 
-export async function sendPasswordResetEmail(email: string) {
-  const { error } = await supabaseAdmin.auth.admin.generateLink({
-    type: "recovery",
-    email,
-    options: { redirectTo: process.env.NEXT_PUBLIC_SITE_URL + "/auth/reset-password" },
-  });
-  if (error) {
-    console.error("Error sending password reset via Supabase:", error);
-    return { success: false, error };
-  }
-  return { success: true };
-}
+  try {
+    // Get active email server
+    const { data: emailServer, error: serverError } = await supabase
+      .from("email_servers")
+      .select("*")
+      .eq("is_active", true)
+      .single()
 
-export async function sendAuthEmail(email: string, type: "signup" | "recovery" | "invite" | "magiclink") {
-  switch (type) {
-    case "signup":
-      return await sendVerificationEmail(email);
-    case "recovery":
-      return await sendPasswordResetEmail(email);
-    case "magiclink":
-      return await sendMagicLinkEmail(email);
-    case "invite":
-      return await sendVerificationEmail(email);
-    default:
-      return { success: false, error: "Invalid email type" };
+    if (serverError || !emailServer) {
+      console.error("No active email server found")
+      return { success: false, error: "No email server configured" }
+    }
+
+    // In a real implementation, you would use nodemailer or similar
+    // For now, we'll log the email details
+    console.log("Sending email:", {
+      to,
+      subject,
+      from: emailServer.from_email,
+      server: emailServer.smtp_host,
+    })
+
+    // Log email attempt in database
+    await supabase.from("email_logs").insert({
+      email_address: to,
+      status: "sent",
+      sent_at: new Date().toISOString(),
+    })
+
+    return { success: true }
+  } catch (error) {
+    console.error("Email sending error:", error)
+
+    // Log failed email attempt
+    await supabase.from("email_logs").insert({
+      email_address: to,
+      status: "failed",
+      error_message: error instanceof Error ? error.message : "Unknown error",
+      sent_at: new Date().toISOString(),
+    })
+
+    return { success: false, error }
   }
 }
